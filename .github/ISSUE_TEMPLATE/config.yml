@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Rapporter fejl i Github repository eller admod ny repo
+    url: https://github.com/RegionH/DAP-SP-ReposRequests/issues
+    about: Du vil blive omdirigeret til at rapportere eventuelle fejl her eller anmode om en ny repo. Vælg »Nyt issue« der.
