@@ -18,7 +18,7 @@ async def upload_study_zip(file: UploadFile = File(...)):
     file_bytes = await file.read()
     study_dir = f"{UC_VOLUME_PATH}"
     
-    os.makedirs(study_dir, exist_ok=True)
+    #os.makedirs(study_dir, exist_ok=True)
 
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
         z.extractall(study_dir)
