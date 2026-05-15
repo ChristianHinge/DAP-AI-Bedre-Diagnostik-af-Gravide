@@ -15,6 +15,7 @@ async def upload_study_zip(file: UploadFile = File(...)):
     study_id = secrets.token_hex(5)
     file_bytes = await file.read()
     zip_path = f"{UC_VOLUME_PATH}/{study_id}.zip"
+    print(os.listdir("/Volumes"))
     with open(zip_path, "wb") as f:
         f.write(file_bytes)
 
