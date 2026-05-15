@@ -10,6 +10,11 @@ UC_VOLUME_PATH = os.environ["UC_VOLUME_PATH"]
 PROCESSING_JOB_ID = int(os.environ.get("PROCESSING_JOB_ID", 0))
 
 
+@app.get("/api/health")
+async def health():
+    return {"status": "ok"}
+
+
 @app.post("/api/upload-study-zip")
 async def upload_study_zip(file: UploadFile = File(...)):
     study_id = secrets.token_hex(5)
