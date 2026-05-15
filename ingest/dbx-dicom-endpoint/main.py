@@ -3,22 +3,22 @@ from databricks.sdk import WorkspaceClient
 import zipfile
 import io
 import os
-import uuid
+import secrets
 
 app = FastAPI()
 _workspace = WorkspaceClient()  # auto-authenticates inside Databricks
 
-UC_VOLUME_PATH = os.environ.get("UC_VOLUME_PATH", "/Volumes/main/medical_data/dicom_storage")
-PROCESSING_JOB_ID = int(os.environ["PROCESSING_JOB_ID"])
+UC_VOLUME_PATH = os.environ.get("UC_VOLUME_PATH", "/Volumes/pixels/dicom/files")
+PROCESSING_JOB_ID = int(os.environ.get("PROCESSING_JOB_ID",0))
 
 
 @app.post("/api/upload-study-zip")
 async def upload_study_zip(file: UploadFile = File(...)):
-    study_id = str(uuid.uuid4())
+    study_id = secrets.token_hex(5)
+    file_bytes = await file.read()
     study_dir = f"{UC_VOLUME_PATH}/{study_id}"
     os.makedirs(study_dir, exist_ok=True)
 
-    file_bytes = await file.read()
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
         z.extractall(study_dir)
 
