@@ -8,7 +8,7 @@ import secrets
 app = FastAPI()
 _workspace = WorkspaceClient()  # auto-authenticates inside Databricks
 
-UC_VOLUME_PATH = os.environ.get("UC_VOLUME_PATH", "/Volumes/pixels/dicom/files")
+UC_VOLUME_PATH = os.environ["UC_VOLUME_PATH"]
 PROCESSING_JOB_ID = int(os.environ.get("PROCESSING_JOB_ID",0))
 
 

@@ -5,3 +5,8 @@ command:
   - "0.0.0.0"
   - --port
   - "8000"
+
+env:
+  - name: UC_VOLUME_PATH
+    valueFrom: volume
+
