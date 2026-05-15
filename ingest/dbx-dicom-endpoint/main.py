@@ -13,7 +13,7 @@ PROCESSING_JOB_ID = int(os.environ.get("PROCESSING_JOB_ID", 0))
 @app.post("/api/upload-study-zip")
 async def upload_study_zip(file: UploadFile = File(...)):
     study_id = secrets.token_hex(5)
-    zip_path = f"{UC_VOLUME_PATH}/{study_id}.zip"
+    zip_path = f"{UC_VOLUME_PATH}/{study_id}/imgs.zip"
 
     # Stream the upload straight into the volume via the Files API.
     # file.file is a SpooledTemporaryFile (BinaryIO), so no need to read into memory.
