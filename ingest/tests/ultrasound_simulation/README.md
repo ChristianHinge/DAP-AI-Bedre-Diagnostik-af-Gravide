@@ -1,0 +1,1 @@
+Simulering af GE ultralydsskanner. orthanc.json, docker-compose.yml mm. 
