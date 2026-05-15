@@ -16,7 +16,8 @@ PROCESSING_JOB_ID = int(os.environ.get("PROCESSING_JOB_ID",0))
 async def upload_study_zip(file: UploadFile = File(...)):
     study_id = secrets.token_hex(5)
     file_bytes = await file.read()
-    study_dir = f"{UC_VOLUME_PATH}/{study_id}"
+    study_dir = f"{UC_VOLUME_PATH}"
+    
     os.makedirs(study_dir, exist_ok=True)
 
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
