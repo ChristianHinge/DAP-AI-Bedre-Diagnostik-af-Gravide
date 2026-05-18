@@ -1,1 +1,1 @@
-Simulering af GE ultralydsskanner. orthanc.json, docker-compose.yml mm. 
+Simulering af GE ultralydsskannerstudie som genoptages. Sender MPPS beskeder og DICOM filer til orthanc server. Se `../orthanc/README` for detaljer.

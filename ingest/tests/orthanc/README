@@ -1,0 +1,9 @@
+Lokal simulering af Orthanc serveren med samme python plugin. 
+
+Simulér studie
+```
+docker-compose up --build
+python ../ultrasound_simulation/simulate_ge_scanner.py
+```
+DICOM filerne skydes op i dbx og compute job startes 
+

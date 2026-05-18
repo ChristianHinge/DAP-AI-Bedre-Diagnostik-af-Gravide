@@ -16,7 +16,7 @@ _server = None
 MPPS_LOG_DIR = os.environ["MPPS_LOG_DIR"]
 DATABRICKS_HOST = os.environ["DATABRICKS_HOST"]
 PROCESSING_JOB_ID = int(os.environ["PROCESSING_JOB_ID"])
-VOLUME_PATH = os.environ["VOLUME_PATH"]
+DATABRICKS_STORE_VOLUME_ROOT = os.environ["DATABRICKS_STORE_VOLUME_ROOT"]
 
 _wc = WorkspaceClient(
     host=DATABRICKS_HOST,
@@ -139,7 +139,7 @@ def _build_study_dir(study_uid):
     patient_hash = hashlib.sha256(patient_id.encode()).hexdigest()[:10]
     study_hash = hashlib.sha256(study_uid.encode()).hexdigest()[:10]
     random_part = secrets.token_hex(5)
-    study_dir = f"{VOLUME_PATH}/patient-{patient_hash}/study-{study_hash}/files-{random_part}"
+    study_dir = f"{DATABRICKS_STORE_VOLUME_ROOT}/patient-{patient_hash}/study-{study_hash}/files-{random_part}"
     return study_dir
 
 
@@ -150,7 +150,7 @@ def _upload_and_trigger(instance_ids, study_dir):
             _wc.files.upload(f"{study_dir}/file-{i:03d}.dcm", io.BytesIO(dicom_bytes), overwrite=True)
         _wc.jobs.run_now(
             job_id=PROCESSING_JOB_ID,
-            job_parameters={"study_dir": study_dir},
+            job_parameters={"volume_input_dir": study_dir},
         )
         orthanc.LogWarning(f"MPPS upload complete: {study_dir}")
     except Exception as e:
