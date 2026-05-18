@@ -28,6 +28,7 @@ async def upload_study_zip(file: UploadFile = File(...)):
         job_id=PROCESSING_JOB_ID,
         job_parameters={"study_id": study_id},
     )
+    
     return {
         "status": "processing_started",
         "study_id": study_id,

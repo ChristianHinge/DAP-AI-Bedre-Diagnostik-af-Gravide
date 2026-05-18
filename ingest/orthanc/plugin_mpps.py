@@ -3,25 +3,26 @@ import json
 import os
 import time
 import datetime
-import zipfile
-import requests
+import hashlib
+import secrets
+import threading
+import traceback
 import orthanc
 from databricks.sdk import WorkspaceClient
 from pynetdicom import AE, evt
 from pynetdicom.sop_class import ModalityPerformedProcedureStep, Verification
 
 _server = None
-DBX_ENDPOINT_URL = os.environ["DBX_ENDPOINT_URL"]
 MPPS_LOG_DIR = os.environ["MPPS_LOG_DIR"]
 DATABRICKS_HOST = os.environ["DATABRICKS_HOST"]
+PROCESSING_JOB_ID = int(os.environ["PROCESSING_JOB_ID"])
+VOLUME_PATH = os.environ["VOLUME_PATH"]
 
-_workspace_client = WorkspaceClient(
+_wc = WorkspaceClient(
     host=DATABRICKS_HOST,
-    azure_client_id=os.environ["AZURE_CLIENT_ID"],
-    azure_client_secret=os.environ["AZURE_CLIENT_SECRET"],
-    azure_tenant_id=os.environ["AZURE_TENANT_ID"],
+    client_id=os.environ["DATABRICKS_CLIENT_ID"],
+    client_secret=os.environ["DATABRICKS_CLIENT_SECRET"],
 )
-_token_cache = {"value": None, "expires_at": 0.0}
 
 os.makedirs(MPPS_LOG_DIR, exist_ok=True)
 
@@ -70,21 +71,49 @@ def _on_completed(attr):
     if not sop_uids:
         return
 
+    threading.Thread(
+        target=_wait_and_forward,
+        args=(sop_uids,),
+        daemon=True,
+        name="mpps-wait-forward",
+    ).start()
+
+
+def _wait_and_forward(sop_uids, max_retries=10, delay=2.0):
+    orthanc.LogWarning(f"MPPS: waiting for {len(sop_uids)} instances to arrive")
     try:
+        for attempt in range(max_retries):
+            missing = {
+                uid for uid in sop_uids
+                if not json.loads(orthanc.RestApiPost(
+                    "/tools/find",
+                    json.dumps({"Level": "Instance", "Query": {"SOPInstanceUID": uid}})
+                ))
+            }
+            if not missing:
+                break
+            orthanc.LogWarning(f"MPPS: {len(missing)}/{len(sop_uids)} instances missing (attempt {attempt + 1}/{max_retries})")
+            time.sleep(delay)
+        else:
+            orthanc.LogError(f"MPPS: timed out, {len(missing)} instances never arrived")
+            return
+
+        orthanc.LogWarning(f"MPPS: all {len(sop_uids)} instances present, resolving study")
         study_uid = _get_study_uid(next(iter(sop_uids)))
         if not study_uid:
             return
 
         known = _study_state.setdefault(study_uid, set())
         if not (sop_uids - known):
+            orthanc.LogWarning(f"MPPS: study {study_uid} already forwarded, skipping")
             return
 
         _forward_study(study_uid)
         known.update(sop_uids)
-        orthanc.LogWarning(f"MPPS forward: study {study_uid}")
+        orthanc.LogWarning(f"MPPS: forward queued for study {study_uid}")
 
-    except Exception as e:
-        orthanc.LogWarning(f"MPPS forward failed: {e}")
+    except Exception:
+        orthanc.LogError(f"MPPS forward failed:\n{traceback.format_exc()}")
 
 
 def _get_study_uid(sop_uid):
@@ -99,45 +128,48 @@ def _get_study_uid(sop_uid):
     return tags["StudyInstanceUID"]
 
 
-def _get_token():
-    if time.time() < _token_cache["expires_at"] - 30:
-        return _token_cache["value"]
-    entra_token = _workspace_client.config.authenticate()["Authorization"].split(" ", 1)[1]
-    resp = requests.post(
-        f"{DATABRICKS_HOST}/oidc/v1/token",
-        data={
-            "client_id":          os.environ["AZURE_CLIENT_ID"],
-            "subject_token":      entra_token,
-            "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
-            "grant_type":         "urn:ietf:params:oauth:grant-type:token-exchange",
-            "scope":              "all-apis",
-        },
-    )
-    resp.raise_for_status()
-    payload = resp.json()
-    _token_cache["value"] = payload["access_token"]
-    _token_cache["expires_at"] = time.time() + payload["expires_in"]
-    return _token_cache["value"]
-
-
-def _forward_study(study_uid):
+def _build_study_dir(study_uid):
     instance_ids = json.loads(orthanc.RestApiPost(
         "/tools/find",
         json.dumps({"Level": "Instance", "Query": {"StudyInstanceUID": study_uid}})
     ))
+    tags = json.loads(orthanc.RestApiGet(f"/instances/{instance_ids[0]}/tags?simplify"))
+    patient_id = tags.get("PatientID", "unknown")
 
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as z:
-        for iid in instance_ids:
-            z.writestr(f"{iid}.dcm", bytes(orthanc.RestApiGet(f"/instances/{iid}/file")))
-    zip_buffer.seek(0)
+    patient_hash = hashlib.sha256(patient_id.encode()).hexdigest()[:10]
+    study_hash = hashlib.sha256(study_uid.encode()).hexdigest()[:10]
+    random_part = secrets.token_hex(5)
+    study_dir = f"{VOLUME_PATH}/patient-{patient_hash}/study-{study_hash}/files-{random_part}"
+    return study_dir
 
-    resp = requests.post(
-        f"{DBX_ENDPOINT_URL}/api/upload-study-zip",
-        headers={"Authorization": f"Bearer {_get_token()}"},
-        files={"file": ("study.zip", zip_buffer, "application/zip")},
-    )
-    resp.raise_for_status()
+
+def _upload_and_trigger(instance_ids, study_dir):
+    try:
+        for i, iid in enumerate(instance_ids):
+            dicom_bytes = bytes(orthanc.RestApiGet(f"/instances/{iid}/file"))
+            _wc.files.upload(f"{study_dir}/file-{i:03d}.dcm", io.BytesIO(dicom_bytes), overwrite=True)
+        _wc.jobs.run_now(
+            job_id=PROCESSING_JOB_ID,
+            job_parameters={"study_dir": study_dir},
+        )
+        orthanc.LogWarning(f"MPPS upload complete: {study_dir}")
+    except Exception as e:
+        orthanc.LogError(f"MPPS upload failed for {study_dir}: {e}")
+
+
+def _forward_study(study_uid):
+    study_dir = _build_study_dir(study_uid)
+    instance_ids = json.loads(orthanc.RestApiPost(
+        "/tools/find",
+        json.dumps({"Level": "Instance", "Query": {"StudyInstanceUID": study_uid}})
+    ))
+    threading.Thread(
+        target=_upload_and_trigger,
+        args=(instance_ids, study_dir),
+        daemon=True,
+        name=f"dbx-upload-{study_uid[:8]}",
+    ).start()
+
 
 def start():
     global _server

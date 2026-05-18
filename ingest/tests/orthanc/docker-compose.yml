@@ -16,11 +16,5 @@ services:
     env_file:
       - .env
 
-  ## Endpoint (simulering af dbx pixels)
-  orthanc-endpoint:
-    image: orthancteam/orthanc:latest
-    ports:
-      - "8052:8042"   
-      - "4252:4242"   
 volumes:
   orthanc-storage:

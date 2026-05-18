@@ -13,6 +13,8 @@ Simulates:
 from collections import defaultdict
 from pathlib import Path
 
+import time
+
 import pydicom
 from pynetdicom import AE
 from pynetdicom.presentation import build_context
@@ -71,12 +73,15 @@ def run(create_file: Path, set_files: list[Path], index: dict) -> None:
             print(f"C-STORE {'OK' if status and status.Status == 0 else 'FAILED'}  {ds.filename}")
         sa.release()
 
-    for sf in set_files:
+    for i, sf in enumerate(set_files):
         set_ds = pydicom.dcmread(sf)
         a = mpps_assoc()
         a.send_n_set(set_ds, ModalityPerformedProcedureStep, uid)
         a.release()
         print(f"N-SET OK  ({sf.name})")
+        if i == 1:
+            print("Sleeping 5s after 2nd N-SET...")
+            time.sleep(5)
 
 
 if __name__ == "__main__":

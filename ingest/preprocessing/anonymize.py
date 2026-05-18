@@ -1,6 +1,5 @@
-from math import pi
 import os
-import sys
+import logging
 import pydicom
 from copy import deepcopy
 import numpy as np
@@ -8,42 +7,9 @@ from PIL import Image
 from pydicom.uid import ExplicitVRLittleEndian
 import time
 import cv2
-import logging
-from logging.handlers import RotatingFileHandler
-import warnings
+import databricks
 
-
-LOG_DIR = os.path.expanduser('~/anonymize_dataset_logs')
-os.makedirs(LOG_DIR, exist_ok=True)
-LOG_FILE = os.path.join(LOG_DIR, 'anonymize_dicoms.log')
-
-# Module-level logger
 logger = logging.getLogger(__name__)
-if not logging.getLogger().hasHandlers():
-    # Create handlers
-    file_handler = RotatingFileHandler(
-        LOG_FILE,
-        backupCount=5,           # Keep 5 backup files
-        encoding='utf-8'
-    )
-    file_handler.setLevel(logging.WARNING)  # File gets warnings and errors
-    
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.WARNING)  # Console gets warnings and above
-    
-    # Create formatter - machine readable format
-    formatter = logging.Formatter(
-        '%(asctime)s|%(levelname)s|%(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-    
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
 
 
 BBOX_COORDS_CONFIGS = {
@@ -317,30 +283,38 @@ def decompress_if_needed(ds):
     return ds
 
 
-if __name__ == "__main__":
-    os.makedirs('model_examples', exist_ok=True)
-    # please forgive me for my sins (not really anymore tbh)
-    for model_name in os.listdir('test_folder'): 
-            os.makedirs(os.path.join('model_examples', model_name, 'anonymized_img'), exist_ok=True)
-            os.makedirs(os.path.join('model_examples', model_name, 'original_img'), exist_ok=True)
-            os.makedirs(os.path.join('model_examples', model_name, 'anonymized_resized_img'), exist_ok=True)
-            for i, file in enumerate(os.listdir(os.path.join('test_folder', model_name))):
-                try:
-                    # original
-                    dicom_to_png(os.path.join('test_folder', model_name, file), 
-                                 os.path.join('model_examples', model_name, 'original_img', f"test_{i}.png"),
-                                 anonymise=False)
-                    # anonymized
-                    dicom_to_png(os.path.join('test_folder', model_name, file),
-                                 os.path.join('model_examples', model_name, 'anonymized_img', f"test_{i}.png"), 
-                                 anonymise=True,
-                                 bbox_frac_coords=((0.0, 0.0), (0.12, 0.8)))
-                    # resized
-                    dicom_to_png(os.path.join('test_folder', model_name, file),
-                                 os.path.join('model_examples', model_name, 'anonymized_resized_img', f"test_{i}.png"), 
-                                 anonymise=True,
-                                 bbox_frac_coords=((0.0, 0.0), (0.12, 0.8)),
-                                 resize=True)
+def process_folder(input_folder: str, output_folder: str) -> None:
+    out_anonymized = os.path.join(output_folder, "anonymized_img")
+    out_resized = os.path.join(output_folder, "anonymized_resized_img")
+    for d in (out_anonymized, out_resized):
+        os.makedirs(d, exist_ok=True)
 
-                except Exception as e:
-                    logger.error("MAIN_PROCESSING_ERROR|model=%s|file=%s|error=%s", model_name, file, str(e))
+    files = [f for f in os.listdir(input_folder) if f.lower().endswith(".dcm")]
+
+    if files:
+        first_ds = pydicom.dcmread(os.path.join(input_folder, files[0]), stop_before_pixels=True)
+        patient_id = str(getattr(first_ds, "PatientID", "unknown"))
+        with open(os.path.join(output_folder, "patient_id.txt"), "w") as f:
+            f.write(patient_id)
+
+    for i, file in enumerate(files):
+        dicom_path = os.path.join(input_folder, file)
+        try:
+            #dicom_to_png(dicom_path, os.path.join(out_original, f"img_{i:03d}.png"), anonymise=False)
+            dicom_to_png(dicom_path, os.path.join(out_anonymized, f"img_{i:03d}.png"), anonymise=True)
+            dicom_to_png(dicom_path, os.path.join(out_resized, f"img_{i:03d}.png"), anonymise=True, resize=True)
+        except Exception as e:
+            logger.error("PROCESSING_ERROR|file=%s|error=%s", file, str(e))
+
+import sys
+input_folder = sys.argv[1]
+output_folder = os.path.join(sys.argv[2], "/".join(input_folder.split("/")[-3:]))
+
+process_folder(input_folder, output_folder)
+
+try:
+    from databricks.sdk.runtime import dbutils
+    dbutils.jobs.taskValues.set(key   = "preprocessed_folder", \
+                                value = output_folder)
+except ValueError:
+    logger.error("Could not import databricks and set output folder variable")
